@@ -1,110 +1,98 @@
-"""A file containing the implementation of the Query and Condition classes for filtering and querying data"""
+"""Implementation of the Query, Condition, and FieldProxy classes for filtering and querying data."""
 
 import operator
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .models import MODEL, Field
+    from .fields import Field
+
+MODEL = None  # kept for backwards-compat imports
+
+
+class FieldProxy:
+    """Class-level proxy for a model field that supports comparison operators returning Condition."""
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"FieldProxy(name={self.name!r})"
+
+    def __eq__(self, other: object) -> "Condition":  # type: ignore[override]
+        return Condition(self, "==", other)
+
+    def __ne__(self, other: object) -> "Condition":  # type: ignore[override]
+        return Condition(self, "!=", other)
+
+    def __lt__(self, other: Any) -> "Condition":
+        return Condition(self, "<", other)
+
+    def __le__(self, other: Any) -> "Condition":
+        return Condition(self, "<=", other)
+
+    def __gt__(self, other: Any) -> "Condition":
+        return Condition(self, ">", other)
+
+    def __ge__(self, other: Any) -> "Condition":
+        return Condition(self, ">=", other)
 
 
 class Query:
-    """A class representing a database query"""
+    """A database query builder."""
 
-    def __init__(self, model: "MODEL") -> None:
-        """Initialize a new query object
-
-        Params:
-            model (``Model``): The model class to query against
-        """
+    def __init__(self, model: type[Any]) -> None:
         self.model = model
-        self.conditions: List[Condition] = []
-
-    def __str__(self) -> str:
-        return self.__repr__()
+        self.conditions: list[Condition] = []
 
     def __repr__(self) -> str:
-        return f"Query(model={self.model.__name__}, conditions={[repr(condition) for condition in self.conditions]})"
+        return f"Query(model={self.model.__name__}, conditions={[repr(c) for c in self.conditions]})"
 
-    def where(self, *conditions: List["Condition"], **filters: Dict[str, Any]) -> "Query":
-        """Add a condition to the query
+    def where(self, *conditions: Any, **filters: Any) -> "Query":
+        """Add conditions to the query.
 
         Params:
-            condition (``Condition``): The conditions to add to the query
-
-            filters (``Dict[str, Any]``): Keyword arguments representing filter criteria for the model instances
-
-        Returns:
-            ``Query``: The updated query object
+            conditions: ``Condition`` objects to add
+            filters: Field name / value pairs that are converted to equality conditions
         """
         self.conditions.extend(conditions)
-
         for field_name, value in filters.items():
             field = getattr(self.model, field_name)
             self.conditions.append(Condition(field, "==", value))
-
         return self
 
-    def execute(self) -> List["MODEL"]:
-        """Execute the query and return the filtered results
+    def execute(self) -> list[Any]:
+        """Execute the query and return matching instances."""
+        return [m for m in self.model.all() if self.evaluate_conditions(m)]
 
-        Returns:
-            ```List[Model]```: The filtered results of the query
-        """
-        models = self.model.all()
-        filtered_results = [model for model in models if self.evaluate_conditions(model)]
-        return filtered_results
-
-    def evaluate_conditions(self, model: "MODEL") -> bool:
-        """Evaluate the conditions for a given model
-
-        Params:
-            model (``Model``): The model to evaluate the conditions against
-
-        Returns:
-            ``bool``: True if all conditions are met, False otherwise
-        """
+    def evaluate_conditions(self, model: Any) -> bool:
+        """Return ``True`` if *model* satisfies all conditions."""
         return all(condition.evaluate(model) for condition in self.conditions)
 
 
 class Condition:
-    """A class representing a condition in a database query"""
+    """A single filter condition used in a query."""
 
-    def __init__(self, field: "Field", op: str, value: Any) -> None:
-        """Initialize a new condition object
-
-        Params:
-            field (``Field``): The field to apply the condition to
-
-            op (``str``): The operator for the condition (e.g., "==", "!=", "<", "<=", ">", ">=")
-
-            value (``Any``): The value to compare against
-        """
+    def __init__(self, field: "Field | FieldProxy", op: str, value: Any) -> None:
         self.field = field
         self.op = op
         self.value = value
 
-    def __str__(self) -> str:
-        return self.__repr__()
-
     def __repr__(self) -> str:
         return f"Condition(field={self.field}, operator='{self.op}', value={self.value})"
 
-    def evaluate(self, model: "MODEL") -> bool:
-        """Evaluate the condition for a given model
-
-        Params:
-            model (``Model``): The model to evaluate the condition against
-
-        Returns:
-            ``bool``: True if the condition is met, False otherwise
-        """
+    def evaluate(self, model: Any) -> bool:
+        """Return ``True`` if the condition holds for *model*."""
         operators_map = {
             "==": operator.eq,
             "!=": operator.ne,
             "<": operator.lt,
             "<=": operator.le,
             ">": operator.gt,
-            ">=": operator.ge
+            ">=": operator.ge,
         }
+        if self.field.name is None:
+            raise ValueError("Field has no name")
         value = getattr(model, self.field.name)
         return operators_map[self.op](value, self.value)
