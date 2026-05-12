@@ -1,118 +1,168 @@
-"""A file containing the implementation of the Model class for database management"""
+"""Implementation of the pydantic-based Model class for database management."""
 
-import copy
+import types
+import typing
 import uuid
+from typing import Any, Self
 
-from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field as PydanticField
+from pydantic import model_validator
+from pydantic._internal._model_construction import ModelMetaclass
 
 from .core import LightDB
-from .exceptions import ValidationError, NoArgsProvidedError
-from .fields import Field
-from .query import Query
+from .exceptions import NoArgsProvidedError
+from .pk import PKConfig
+from .query import Condition, FieldProxy, Query
 
-MODEL = TypeVar("MODEL", bound="Model")
+MODEL = None  # kept for backwards-compat imports
 
 
-class ModelMeta(type):
-    """A metaclass for the Model class that ensures that required class-level attributes are present and have valid types"""
+def _prepare_model_attrs(attrs: dict[str, Any], table: str | None, pk: str | None) -> None:
+    """Validate table/pk kwargs and scan for PKConfig sentinels in the namespace dict."""
+    if not table:
+        raise ValueError("`table` is required for model classes")
+    if not isinstance(table, str):
+        raise TypeError(f"`table` must be of type `str` (`{type(table)}` given)")
 
-    def __new__(mcs, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any], **kwargs) -> "Model":
+    attrs["__table__"] = table
+
+    if not attrs.get("__db__"):
+        attrs["__db__"] = LightDB.current()
+
+    pk_field_name: str | None = pk
+    pk_kind: str | None = None
+
+    # Detect PKConfig markers — replace sentinel with a real pydantic Field(default=None).
+    # We intentionally do NOT touch __annotations__ here; on Python 3.14+ annotations live
+    # in annotationlib and are inaccessible as a namespace dict key before class creation.
+    # PK value injection happens in the model_validator on Model.
+    for field_name, field_default in list(attrs.items()):
+        if isinstance(field_default, PKConfig):
+            if pk_field_name is None:
+                pk_field_name = field_name
+            pk_kind = field_default.kind
+            attrs[field_name] = PydanticField(default=None)
+
+    attrs["__pk__"] = pk_field_name
+    attrs["__pk_kind__"] = pk_kind
+
+
+def _widen_pk_annotation(cls: type, attrs: dict[str, Any]) -> None:
+    """Widen the PK field annotation to ``type | None`` after class creation.
+
+    This allows pydantic to accept ``None`` at construction time so that the
+    ``_inject_pk`` model validator can fill in the generated value.
+    """
+    pk_field_name = attrs.get("__pk__")
+    pk_kind = attrs.get("__pk_kind__")
+    if pk_field_name and pk_kind:
+        ann = cls.__annotations__
+        if pk_field_name in ann:
+            original_type = ann[pk_field_name]
+            if not _is_optional(original_type):
+                cls.__annotations__[pk_field_name] = original_type | None
+                cls.model_rebuild(force=True)
+
+
+def _is_optional(tp: Any) -> bool:
+    """Return True if *tp* already includes ``None`` (i.e. is a union with ``NoneType``)."""
+    origin = getattr(tp, "__origin__", None)
+    # Handle `X | None` (types.UnionType, Python 3.10+) and `Optional[X]` (typing.Union)
+    if origin is types.UnionType or origin is typing.Union:
+        return type(None) in tp.__args__
+    return tp is type(None)
+
+
+class LightDBMeta(ModelMetaclass):
+    """Metaclass for Model — adds table/pk kwargs, field proxies, and auto-pk logic."""
+
+    def __new__(
+        mcs,
+        name: str,
+        bases: tuple[type, ...],
+        attrs: dict[str, Any],
+        table: str | None = None,
+        pk: str | None = None,
+        **kwargs: Any,
+    ) -> type:
         if name != "Model":
-            table = kwargs.pop("table")
-            if not table:
-                raise ValueError("`table` is required for model classes")
+            _prepare_model_attrs(attrs, table, pk)
 
-            if not isinstance(table, str):
-                raise ValidationError(f"`table` must be of type `str` (`{type(table)}` given)")
+        cls = super().__new__(mcs, name, bases, attrs, **kwargs)
 
-            attrs["__table__"] = table
+        # Post-creation: widen PK annotation to `type | None` so pydantic accepts None
+        # at construction time (before the model_validator injects the actual PK value).
+        # Modifying __annotations__ on the *class* (not the namespace dict) works on all
+        # Python versions, including 3.14+ where annotations use annotationlib.
+        if name != "Model":
+            _widen_pk_annotation(cls, attrs)
 
-            if not attrs.get("__db__"):
-                attrs["__db__"] = LightDB.current()
+        return cls
 
-            annotations: Dict[str, Any] = attrs.get("__annotations__", {})
-            fields_map: Dict[str, Any] = {}
-
-            def add_field(field_name: str, field_type: Type, field_default: Any = None) -> None:
-                field = Field(name=field_name, annotation=field_type)
-                if field_default is not None:
-                    field.default = field_default
-
-                attrs[field_name] = field
-                fields_map[field_name] = field
-
-            if "_id" not in annotations:
-                annotations["_id"] = str
-                add_field("_id", str, attrs.get("_id"))
-
-            for field_name, field_type in annotations.items():
-                if field_name != "_id":
-                    add_field(field_name, field_type, attrs.get(field_name))
-
-            attrs["_fields_map"] = fields_map
-
-        return super().__new__(mcs, name, bases, attrs)
+    def __getattr__(self, name: str) -> FieldProxy:  # noqa: N805
+        """Return a FieldProxy for class-level attribute access (enables User.age >= 20)."""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            annotations: dict[str, Any] = object.__getattribute__(self, "__annotations__")
+        except AttributeError:
+            annotations = {}
+        if name in annotations:
+            return FieldProxy(name)
+        raise AttributeError(f"type object '{self.__name__}' has no attribute '{name}'")
 
 
-class Model(metaclass=ModelMeta):
-    """A base model class that provides a simple interface for interacting with data in a LightDB database"""
+class Model(PydanticBaseModel, metaclass=LightDBMeta):
+    """Base model class for interacting with data in a LightDB database."""
 
-    __table__: str = None
-    __db__: LightDB = None
+    model_config = {"arbitrary_types_allowed": True}
 
-    def __init__(self, **kwargs) -> None:
-        """Initializes a new instance of the model with the provided keyword arguments
+    __table__: str | None = None
+    __db__: LightDB | None = None
+    __pk__: str | None = None
+    __pk_kind__: str | None = None
 
-        Params:
-            kwargs (``Dict[str, Any]``): Keyword arguments representing field names and values for the model instance
-        """
-        self._fields_map: Dict[str, Field] = copy.deepcopy(self._fields_map)
+    def __init_subclass__(cls, table: str | None = None, pk: str | None = None, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
 
-        if "_id" not in kwargs:
-            kwargs["_id"] = str(uuid.uuid4())
-
-        for name, field in self._fields_map.items():
-            value = kwargs.get(name, field.value if field.value is not None else field.default)
-
-            field.value = value
-            field.validate()
-
-            self._fields_map[name] = field
-            super().__setattr__(name, field.value)
-
-    def __setattr__(self, key: str, value: Any) -> None:
-        if key in self._fields_map:
-            field = self._fields_map[key]
-            field.value = value
-            field.validate()
-        else:
-            super().__setattr__(key, value)
-
-    def __getattribute__(self, item: Any) -> Any:
-        fields_map = super().__getattribute__("_fields_map")
-        if item in fields_map:
-            value = fields_map[item].value
-        else:
-            value = super().__getattribute__(item)
-
-        return value
-
-    def __str__(self) -> str:
-        return self.__repr__()
-
-    def __repr__(self) -> str:
-        fields_info = [f"{name}={field.value}" for name, field in self._fields_map.items()]
-        return f"{self.__class__.__name__}({', '.join(fields_info)})"
+    @model_validator(mode="before")
+    @classmethod
+    def _inject_pk(cls, data: Any) -> Any:
+        """Auto-generate PK value before pydantic validates the model."""
+        pk_field = cls.__pk__
+        pk_kind = cls.__pk_kind__
+        if not pk_field or not pk_kind:
+            return data
+        if not isinstance(data, dict):
+            return data
+        if data.get(pk_field) is not None:
+            return data
+        if pk_kind == "uuid":
+            data = {**data, pk_field: str(uuid.uuid4())}
+        elif pk_kind == "int":
+            data = {**data, pk_field: cls._compute_next_int_pk()}
+        return data
 
     @classmethod
-    def create(cls: Type[MODEL], **kwargs) -> MODEL:
-        """Creates a new instance of the model with the provided keyword arguments and saves it to the database
+    def _compute_next_int_pk(cls) -> int:
+        """Return the next auto-increment integer PK for this model."""
+        pk_field = cls.__pk__
+        rows = cls.__db__.get(cls.__table__, [])  # type: ignore[union-attr]
+        if not rows:
+            return 1
+        return max(row.get(pk_field, 0) for row in rows) + 1
+
+    def __repr__(self) -> str:
+        fields_info = ", ".join(f"{k}={v!r}" for k, v in self.model_dump().items())
+        return f"{self.__class__.__name__}({fields_info})"
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> Self:
+        """Create and persist a new model instance.
 
         Params:
-            kwargs (``Dict[str, Any]``): Keyword arguments representing field names and values for the model instance
-
-        Returns:
-            ``Model``: The newly created instance of the model
+            kwargs: Field names and their values
         """
         if not kwargs:
             raise NoArgsProvidedError("No `kwargs` were provided")
@@ -122,14 +172,12 @@ class Model(metaclass=ModelMeta):
         return instance
 
     @classmethod
-    def get(cls: Type[MODEL], *args, **kwargs) -> Optional[MODEL]:
-        """Retrieves a single instance of the model that matches the provided filter criteria
+    def get(cls, *args: Any, **kwargs: Any) -> Self | None:
+        """Return a single instance matching the filter criteria.
 
-        Params:
-            kwargs (``Dict[str, Any]``): Keyword arguments representing filter criteria for the model instance
-
-        Returns:
-            ``Optional[Model]``: The matching instance of the model, or None if no matching instance is found
+        Raises:
+            NoArgsProvidedError: If no filters were given
+            ValueError: If more than one match is found
         """
         if not (args or kwargs):
             raise NoArgsProvidedError("No `args` or `kwargs` were provided")
@@ -144,33 +192,35 @@ class Model(metaclass=ModelMeta):
         return results[0]
 
     def save(self) -> None:
-        """Saves the current state of the model instance to the database"""
-        existing_instance = self.get(_id=self._fields_map["_id"].value)
-        if existing_instance:
-            existing_instance.delete()
+        """Persist the current state of this instance to the database."""
+        pk_field = self.__class__.__pk__
+        if pk_field:
+            existing = self.__class__.get(**{pk_field: getattr(self, pk_field)})
+            if existing:
+                existing.delete()
 
-        new_data = {name: field.value for name, field in self._fields_map.items()}
-        self.__db__.setdefault(self.__table__, []).append(new_data)
-        self.__db__.save()
+        new_data = self.model_dump()
+        self.__db__.setdefault(self.__table__, []).append(new_data)  # type: ignore[union-attr]
+        self.__db__.save()  # type: ignore[union-attr]
 
     def delete(self) -> None:
-        """Deletes the current instance of the model from the database"""
-        rows = self.__db__.get(self.__table__, [])
+        """Delete this instance from the database."""
+        pk_field = self.__class__.__pk__
+        rows = self.__db__.get(self.__table__, [])  # type: ignore[union-attr]
+        pk_value = getattr(self, pk_field) if pk_field else None
 
         for item in rows:
-            if item["_id"] == self._fields_map["_id"].value:
+            if pk_field and item.get(pk_field) == pk_value:
                 rows.remove(item)
-                self.__db__.save()
+                self.__db__.save()  # type: ignore[union-attr]
+                return
 
     @classmethod
-    def filter(cls: Type[MODEL], *args, **kwargs) -> List[MODEL]:
-        """Retrieves a list of instances of the model that matmatch thech the provided filter criteria
+    def filter(cls, *args: Any, **kwargs: Any) -> list[Self]:
+        """Return all instances matching the filter criteria.
 
-        Params:
-            kwargs (``Dict[str, Any]``): Keyword arguments representing filter criteria for the model instances
-
-        Returns:
-            A list of instances of the model that provided filter criteria
+        Raises:
+            NoArgsProvidedError: If no filters were given
         """
         if not (args or kwargs):
             raise NoArgsProvidedError("No `args` or `kwargs` were provided")
@@ -180,13 +230,6 @@ class Model(metaclass=ModelMeta):
         return query.execute()
 
     @classmethod
-    def all(cls: Type[MODEL], use_db: LightDB = None) -> List[MODEL]:
-        """Retrieves a list of all instances of the model from the database
-
-        Returns:
-            ``List[Model]``: A list of all instances of the model
-        """
-        results = []
-        for row in (use_db or cls.__db__).get(cls.__table__, []):
-            results.append(cls(**row))
-        return results
+    def all(cls, use_db: LightDB | None = None) -> list[Self]:
+        """Return all instances of this model from the database."""
+        return [cls(**row) for row in (use_db or cls.__db__).get(cls.__table__, [])]  # type: ignore[union-attr]
