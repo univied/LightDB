@@ -1,16 +1,17 @@
-"""A file contains custom exceptions"""
+"""Custom exceptions for LightDB."""
+
 
 class Error(Exception):
-    """Base class for all errors related to the database models"""
+    """Base class for all LightDB errors."""
 
 
 class ValidationError(Error, TypeError):
-    """Error raised when validation of a field fails"""
+    """Raised when a field value fails type validation."""
 
 
 class FieldNotFoundError(Error, ValueError):
-    """Exception raised when a field specified in the model does not exist in the table"""
+    """Raised when a referenced field does not exist in the table."""
 
 
 class NoArgsProvidedError(Error, TypeError):
-    """Exception raised when no arguments are provided to a method that requires at least one argument"""
+    """Raised when a method that requires at least one argument is called with none."""
