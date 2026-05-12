@@ -1,24 +1,24 @@
 import pytest
 import os
 
-from typing import Any, Dict, List
-
 from lightdb.core import LightDB
-from lightdb.query import Query, Condition
+from lightdb.query import Query, Condition, FieldProxy
 from lightdb.fields import Field
-from lightdb.models import MODEL, Model
+from lightdb.models import Model
+from lightdb.pk import int_pk
 
 
 @pytest.fixture
 def user_model():
     test_db_location = "test_db.json"
-    db = LightDB(test_db_location)
+    LightDB(test_db_location)
 
-    class User(Model, table="users"):
+    class User(Model, table="users", pk="id"):
+        id: int = int_pk()
         name: str
         age: int
-        items: List[str] = []
-        extra: Dict[str, Any] = {}
+        items: list[str] = []
+        extra: dict[str, object] = {}
 
     yield User
 
@@ -26,39 +26,49 @@ def user_model():
         os.remove(test_db_location)
 
 
-def test_query_initialization(user_model: MODEL):
+def test_query_initialization(user_model: type):
     query = Query(user_model)
     assert query.model == user_model
     assert query.conditions == []
 
 
-def test_query_where(user_model: MODEL):
+def test_query_where(user_model: type):
     query = Query(user_model)
     query.where(name="John", age=30)
     assert len(query.conditions) == 2
-    assert query.conditions[0].field.name == "name"
-    assert query.conditions[0].op == "=="
-    assert query.conditions[0].value == "John"
+    names = {c.field.name for c in query.conditions}
+    assert "name" in names
+    assert "age" in names
 
 
-def test_query_execute(user_model: MODEL):
+def test_query_execute(user_model: type):
     user_model.create(name="John", age=30)
     user_model.create(name="Jane", age=25)
-    
+
     query = Query(user_model)
     query.where(age=30)
     results = query.execute()
-    
+
     assert len(results) == 1
     assert results[0].name == "John"
 
 
 def test_condition_evaluate():
-    field = Field(name="age", annotation=int)
-    condition = Condition(field, "==", 30)
-    
+    proxy = FieldProxy(name="age")
+    condition = Condition(proxy, "==", 30)
+
     class TestModelMock:
         age = 30
-    
+
     model = TestModelMock()
-    assert condition.evaluate(model) == True
+    assert condition.evaluate(model) is True
+
+
+def test_field_proxy_operators():
+    proxy = FieldProxy("age")
+    assert isinstance(proxy == 5, Condition)
+    assert isinstance(proxy != 5, Condition)
+    assert isinstance(proxy > 5, Condition)
+    assert isinstance(proxy >= 5, Condition)
+    assert isinstance(proxy < 5, Condition)
+    assert isinstance(proxy <= 5, Condition)

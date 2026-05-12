@@ -1,44 +1,44 @@
-from lightdb import LightDB
-from lightdb.models import Model
+# ruff: noqa: S101
 
-from typing import List, Dict, Any
+from lightdb import LightDB, Model
+from lightdb.pk import int_pk
 
 # Initialize the database
 db = LightDB("db.json")
 
 
-# Define a User model
-class User(Model, table="users"):
+# Define a User model with an auto-increment integer PK
+class User(Model, table="users", pk="id"):
+    id: int = int_pk()
     name: str
     age: int
-    items: List[str] = []
-    extra: Dict[str, Any] = {}
+    tags: list[str] = []
 
 
-# Create a new user
+# Create a new user (id is assigned automatically)
 user = User.create(name="Alice", age=30)
-print(f"Created User: {user}")
+print(f"Created: {user}")  # User(id=1, name='Alice', age=30)
 
-# Retrieve the user
-retrieved_user = User.get(name="Alice")
-if retrieved_user:
-    print(f"Retrieved User: {retrieved_user.name}, Age: {retrieved_user.age}")
+# Retrieve a user
+retrieved = User.get(name="Alice")
+assert retrieved is not None
+print(f"Retrieved: {retrieved.name}, age {retrieved.age}")
 
-# Update the user's name
-retrieved_user.name = "Kristy"
-retrieved_user.save()
-print(f"Updated User: {retrieved_user}")
+# Update
+retrieved.name = "Kristy"
+retrieved.save()
+print(f"Updated: {retrieved}")
 
-# Filter users by age
-users_over_20 = User.filter(User.age >= 20)
-print("Users over 20:")
-for user in users_over_20:
-    print(f"Name: {user.name}, Age: {user.age}")
+# Filter with comparison operators
+adults = User.filter(User.age >= 18)
+print("Adults:")
+for u in adults:
+    print(f"  {u.name}, age {u.age}")
 
-# Delete the user
-retrieved_user.delete()
-print(f"Deleted User: {retrieved_user.name}")
+# Delete
+retrieved.delete()
+print(f"Deleted: {retrieved.name}")
 
 # Verify deletion
-deleted_user = User.get(name="Kristy")
-print(f"User exists after deletion: {deleted_user is not None}")
+gone = User.get(name="Kristy")
+print(f"Still exists: {gone is not None}")
