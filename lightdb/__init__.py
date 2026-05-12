@@ -1,27 +1,23 @@
 """
-LightDB Package
-~~~~~~~~~~~~~~~
+LightDB
+~~~~~~~
 
-This package provides a lightweight database management system implemented with JSON file storage. 
-It includes the main LightDB class and related modules for field validation, model management, 
-and query handling
+A lightweight JSON-backed database for Python 3.12+.
 
 Modules:
-    core (LightDB): Main implementation of the LightDB database management system
-    exceptions: Custom exceptions used in the LightDB package
-    fields: Implementation of the Field class for data validation and storage
-    models: Implementation of the Model class for database management
-    query: Implementation of query handling for database operations
-
-Attributes:
-    __all__ (``list``): List of public objects of the module.
-    __version__ (``str``): The version of the LightDB package.
+    core: Main LightDB implementation
+    exceptions: Custom exceptions
+    fields: Field class for type validation (legacy)
+    models: Model base class
+    pk: Primary key helpers
+    query: Query and Condition classes
 """
 
 from .core import LightDB
 from .fields import Field
 from .models import Model
-from .query import Query
+from .pk import int_pk, uuid_pk
+from .query import Condition, FieldProxy, Query
 
-__all__ = ["LightDB", "Field", "Model", "Query"]
-__version__ = "2.0"
+__all__ = ["LightDB", "Field", "Model", "Query", "Condition", "FieldProxy", "int_pk", "uuid_pk"]
+__version__ = "3.0.0"
