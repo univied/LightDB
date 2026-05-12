@@ -5,8 +5,8 @@
     <br>
     Fork of original <a href='https://github.com/Fl1yd/LightDB'>LightDB</a> with Pydantic, maintenance and Python 3.12+ support
     <br><br>
-    <a href="https://github.com/univied/lightdb/releases"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Funivied%2Flightdb%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&style=flat&logo=github" alt="Version"></a>
-    <a href="https://python.org"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Funivied%2Flightdb%2Fmain%2Fpyproject.toml&query=%24.project.requires-python&label=python&style=flat&logo=python&logoColor=white" alt="Python"></a>
+    <a href="https://github.com/univied/lightdb/releases"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Funivied%2Flightdb%2Fmaster%2Fpyproject.toml&query=%24.project.version&label=version&style=flat&logo=github" alt="Version"></a>
+    <a href="https://python.org"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Funivied%2Flightdb%2Fmaster%2Fpyproject.toml&query=%24.project.requires-python&label=python&style=flat&logo=python&logoColor=white" alt="Python"></a>
     <img src="https://img.shields.io/badge/typecheck-basedpyright-8A2BE2?style=flat" alt="basedpyright">
     <img src="https://img.shields.io/badge/lint-ruff-FCFD00?style=flat" alt="ruff">
 </p>
