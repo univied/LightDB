@@ -1,21 +1,27 @@
 <p align="center">
-    <img src="docs\source\_static\logo_light.svg">
+    <img src="docs\assets\logo_light.svg">
     <br>
-    <b>LightDB</b>: Lightweight JSON Database for Python
+    <b>Re-LightDB</b>: Lightweight JSON Database for Python
+    <br>
+    Fork of original <a href='https://github.com/Fl1yd/LightDB'>LightDB</a> with Pydantic, maintenance and Python 3.12+ support
+    <br><br>
+    <a href="https://github.com/univied/lightdb/releases"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Funivied%2Flightdb%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&style=flat&logo=github" alt="Version"></a>
+    <a href="https://python.org"><img src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Funivied%2Flightdb%2Fmain%2Fpyproject.toml&query=%24.project.requires-python&label=python&style=flat&logo=python&logoColor=white" alt="Python"></a>
+    <img src="https://img.shields.io/badge/typecheck-basedpyright-8A2BE2?style=flat" alt="basedpyright">
+    <img src="https://img.shields.io/badge/lint-ruff-FCFD00?style=flat" alt="ruff">
 </p>
-
 
 <h1>What is this?</h1>
 
-LightDB is a simple and lightweight JSON database for Python that allows users to <b>efficiently</b> write data to a file. It is designed to be <b>easy to use</b>, making it a great choice for developers who need a fast and reliable way to store and retrieve data.
+Re-LightDB is a simple and lightweight JSON database for Python that allows users to <b>efficiently</b> write data to a file. It is designed to be <b>easy to use</b>, making it a great choice for developers who need a fast and reliable way to store and retrieve data.
 
 
 <h1>Installing</h1>
 
-You can install LightDB using <code>pip</code>:
+You can install Re-LightDB using [uv](https://docs.astral.sh/uv):
 
 <pre lang="bash">
-pip install LightDB
+uv add "re-lightdb @ git+https://github.com/univied/lightdb"
 </pre>
 
 
